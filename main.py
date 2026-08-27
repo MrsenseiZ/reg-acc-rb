@@ -232,26 +232,109 @@ def worker(worker_id: int, cfg: dict, solver: CaptchaSolver, discord: DiscordNot
 
         time.sleep(delay)
 
+def check_and_prompt_keys(cfg: dict) -> dict:
+    """Tự động hỏi người dùng nhập Key OmoCaptcha và Webhook Discord trên Termux nếu chưa có (Tự lưu vĩnh viễn vào máy)."""
+    changed = False
+    
+    # 1. Kiểm tra OmoCaptcha Key
+    current_key = cfg.get("captcha", {}).get("api_key", "").strip()
+    if not current_key or current_key in ["YOUR_OMOCAPTCHA_KEY_HERE", "DIEN_KEY_OMOCAPTCHA_VAO_DAY", "DIEN_OMOCAPTCHA_KEY_VAO_DAY"]:
+        print(f"\n{YELLOW}══════════════════════════════════════════════════════════════{RESET}")
+        print(f"{YELLOW}🔑 THIẾT LẬP LẦN ĐẦU TRÊN MÁY (Tự động lưu vĩnh viễn):{RESET}")
+        print(f"{YELLOW}══════════════════════════════════════════════════════════════{RESET}")
+        try:
+            omo_in = input(f"{CYAN}👉 Dán API Key OmoCaptcha của bạn: {RESET}").strip()
+            if omo_in:
+                cfg.setdefault("captcha", {})["api_key"] = omo_in
+                changed = True
+        except (KeyboardInterrupt, EOFError):
+            pass
+
+    # 2. Kiểm tra Discord Webhook
+    current_webhook = cfg.get("discord_webhook", "").strip()
+    if not current_webhook or current_webhook in ["https://discord.com/api/webhooks/YOUR_WEBHOOK_HERE", "https://discord.com/api/webhooks/DIEN_WEBHOOK_CUA_BAN_VAO_DAY"]:
+        try:
+            wh_in = input(f"{CYAN}👉 Dán Discord Webhook URL (Bấm Enter để bỏ qua nếu không dùng): {RESET}").strip()
+            if wh_in:
+                cfg["discord_webhook"] = wh_in
+                changed = True
+        except (KeyboardInterrupt, EOFError):
+            pass
+
+    # 3. Kiểm tra Link APK Roblox/Delta
+    current_apk = cfg.get("roblox_apk_download_link", "").strip()
+    if not current_apk:
+        try:
+            apk_in = input(f"{CYAN}👉 Dán Link tải APK Roblox mới (Bấm Enter để dùng Delta mặc định): {RESET}").strip()
+            if apk_in and apk_in.startswith("http"):
+                cfg["roblox_apk_download_link"] = apk_in
+                changed = True
+            else:
+                cfg["roblox_apk_download_link"] = "https://delta.filenetwork.vip/file/Delta-2.735.1138.apk"
+                changed = True
+        except (KeyboardInterrupt, EOFError):
+            pass
+
+    # Tự động lưu lại vào config.json trên máy Cloud Phone
+    if changed:
+        with open("config.json", "w", encoding="utf-8") as f:
+            json.dump(cfg, f, indent=2)
+        print(f"\n{GREEN}[✓] Đã lưu cấu hình vào máy Cloud Phone! Các lần sau sẽ tự chạy không cần hỏi lại.{RESET}\n")
+
+    return cfg
+
 def main():
     parser = argparse.ArgumentParser(description="Termux Roblox Mass Account Creator")
     parser.add_argument("-n", "--count", type=int, default=None, help="Số lượng tài khoản muốn tạo (Ví dụ: -n 50)")
     parser.add_argument("-t", "--threads", type=int, default=None, help="Số luồng chạy song song (Ví dụ: -t 5)")
     parser.add_argument("-m", "--mode", type=str, choices=["app", "api"], default=None, help="Chế độ chạy: app (trên app thật) hoặc api (chạy ngầm)")
+    parser.add_argument("-k", "--omo-key", type=str, default=None, help="API Key OmoCaptcha")
+    parser.add_argument("-w", "--webhook", type=str, default=None, help="Discord Webhook URL")
+    parser.add_argument("-p", "--proxy", type=str, default=None, help="Proxy chuỗi (user:pass@host:port)")
+    parser.add_argument("-a", "--apk-url", type=str, default=None, help="Link tải APK Roblox mới")
     args = parser.parse_args()
 
     cfg = load_config()
+
+    # Ghi đè cấu hình nếu người dùng truyền qua tham số dòng lệnh
+    if args.omo_key:
+        cfg.setdefault("captcha", {})["api_key"] = args.omo_key
+    if args.webhook:
+        cfg["discord_webhook"] = args.webhook
+    if args.apk_url:
+        cfg["roblox_apk_download_link"] = args.apk_url
+    if args.proxy:
+        with open("proxies.txt", "w", encoding="utf-8") as f:
+            f.write(f"{args.proxy}\n")
+        cfg.setdefault("proxy", {})["enabled"] = True
+
+    # Hỏi nhập cấu hình nếu chưa có (lưu cục bộ trên máy)
+    cfg = check_and_prompt_keys(cfg)
+
     settings = cfg.get("settings", {})
     captcha_cfg = cfg.get("captcha", {})
     proxy_cfg = cfg.get("proxy", {})
     apk_cfg = cfg.get("roblox_apk", {})
-    
-    # Ghi đè cấu hình nếu người dùng truyền qua tham số dòng lệnh
+
+    # Hỏi số lượng tài khoản muốn tạo nếu không truyền cờ -n
+    default_total = settings.get("total_accounts", 500)
+    if args.count:
+        total_req = args.count
+    else:
+        try:
+            user_count_str = input(f"{CYAN}👉 Nhập số lượng tài khoản muốn tạo (Mặc định: {default_total}, bấm Enter để lấy mặc định): {RESET}").strip()
+            if user_count_str.isdigit() and int(user_count_str) > 0:
+                total_req = int(user_count_str)
+            else:
+                total_req = default_total
+        except (KeyboardInterrupt, EOFError):
+            total_req = default_total
+
+    settings["total_accounts"] = total_req
+
     if args.mode:
         cfg["execution_mode"] = args.mode
     exec_mode = cfg.get("execution_mode", "app").lower()
-    
-    if args.count:
-        settings["total_accounts"] = args.count
     if args.threads:
         settings["threads"] = args.threads
 
