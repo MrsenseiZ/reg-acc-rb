@@ -27,17 +27,47 @@ class ApkInstaller:
         self.apk_path = os.path.abspath(self.filename)
 
     def download_apk(self) -> bool:
-        """Tải APK với thanh tiến trình trực quan."""
+        """Tải APK với thanh tiến trình trực quan (Bypass Cloudflare bằng Curl/Wget)."""
         if not self.apk_url:
             print(f"{RED}[!] Không có link tải APK trong cấu hình!{RESET}")
             return False
 
         print(f"\n{CYAN}[+] Đang kết nối tới máy chủ tải APK: {self.apk_url}{RESET}")
+
+        # 1. Thử tải bằng CURL (Tự động bypass Cloudflare 403 & có thanh tiến trình chuẩn)
+        if shutil.which("curl"):
+            try:
+                print(f"{CYAN}[+] Đang tải APK bằng CURL (Chống chặn Cloudflare)...{RESET}")
+                ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
+                cmd = ["curl", "-L", "-A", ua, "--progress-bar", "-o", self.apk_path, self.apk_url]
+                ret = subprocess.run(cmd)
+                if ret.returncode == 0 and os.path.exists(self.apk_path) and os.path.getsize(self.apk_path) > 1024 * 1024:
+                    print(f"\n{GREEN}[✓] Đã tải thành công APK ({os.path.getsize(self.apk_path)/(1024*1024):.1f} MB) về: {self.apk_path}{RESET}")
+                    return True
+            except Exception as e:
+                print(f"{YELLOW}[!] Curl gặp lỗi: {e}, thử phương án tiếp theo...{RESET}")
+
+        # 2. Thử tải bằng WGET
+        if shutil.which("wget"):
+            try:
+                print(f"{CYAN}[+] Đang tải APK bằng WGET...{RESET}")
+                ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
+                cmd = ["wget", "-U", ua, "-O", self.apk_path, self.apk_url]
+                ret = subprocess.run(cmd)
+                if ret.returncode == 0 and os.path.exists(self.apk_path) and os.path.getsize(self.apk_path) > 1024 * 1024:
+                    print(f"\n{GREEN}[✓] Đã tải thành công APK về: {self.apk_path}{RESET}")
+                    return True
+            except Exception:
+                pass
+
+        # 3. Fallback bằng Python Requests
         try:
             headers = {
-                "User-Agent": "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Mobile Safari/537.36"
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
+                "Referer": "https://delta.filenetwork.vip/",
+                "Accept": "*/*"
             }
-            res = requests.get(self.apk_url, headers=headers, stream=True, timeout=30)
+            res = requests.get(self.apk_url, headers=headers, stream=True, timeout=60)
             if res.status_code != 200:
                 print(f"{RED}[!] Lỗi tải APK (HTTP {res.status_code}){RESET}")
                 return False
@@ -49,7 +79,7 @@ class ApkInstaller:
             print(f"{CYAN}[+] Đang tải về file: {self.filename} ({total_size / (1024*1024):.2f} MB)...{RESET}")
 
             with open(self.apk_path, "wb") as f:
-                for chunk in res.iter_content(chunk_size=1024 * 128):
+                for chunk in res.iter_content(chunk_size=1024 * 256):
                     if chunk:
                         f.write(chunk)
                         downloaded += len(chunk)
