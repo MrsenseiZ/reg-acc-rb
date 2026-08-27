@@ -1,0 +1,6 @@
+# Danh sách Proxy (Mỗi dòng 1 proxy)
+# Hỗ trợ cả 2 định dạng phổ biến:
+# 1. user:pass@host:port (Ví dụ từ Nettify như trong ảnh của bạn)
+# 2. host:port:user:pass
+
+2gg70q2htjxf:0jbj9r0k3oej@eu.nettify.xyz:8080

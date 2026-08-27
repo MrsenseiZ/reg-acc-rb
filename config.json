@@ -1,0 +1,32 @@
+{
+  "_CHU_Y": "LINK TẢI ROBLOX / DELTA APK NẰM NGAY DÒNG DƯỚI - BẠN CÓ THỂ ĐỔI BẤT KỲ LÚC NÀO",
+  "roblox_apk_download_link": "https://delta.filenetwork.vip/file/Delta-2.735.1138.apk",
+
+  "execution_mode": "app",
+
+  "discord_webhook": "https://discord.com/api/webhooks/YOUR_WEBHOOK_HERE",
+  "discord_notification_mode": "batch_file",
+
+  "captcha": {
+    "provider": "omocaptcha",
+    "api_key": "YOUR_OMOCAPTCHA_KEY_HERE",
+    "sitekey": "47A08D90-3D8B-4C9A-9F09-6B6F9374B358"
+  },
+
+  "settings": {
+    "threads": 1,
+    "total_accounts": 500,
+    "delay_between_creates": 3,
+    "age_mode": "18+",
+    "under13": false,
+    "password_mode": "random",
+    "static_password": "RezzPass2026!@",
+    "save_file": "accounts.txt"
+  },
+
+  "proxy": {
+    "enabled": true,
+    "proxy_file": "proxies.txt",
+    "sticky_session": true
+  }
+}
