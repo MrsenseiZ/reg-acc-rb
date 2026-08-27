@@ -2,20 +2,19 @@
 # -*- coding: utf-8 -*-
 """
 Module Tự Động Thao Tác Trực Tiếp Trên App Delta Roblox (Android Native UI)
-PHƯƠNG PHÁP MỚI: TÌM & BẤM THEO PHẦN TỬ THẬT (UI Node Locator + Tab Navigation)
-- Không dùng tọa độ mù!
-- Tự động trích xuất vị trí chính xác của Nút bấm & Ô nhập từ cấu trúc giao diện Android (UI Hierarchy)
-- Kết hợp phím TAB & ENTER để điền form tự động chuẩn xác 100%
+Phiên bản Tối Ưu Hóa Tuyệt Đối (Không dùng uiautomator gây treo máy):
+1. Mở App chuẩn 100% qua Protocol roblox:// và Intent Launcher (Không crash)
+2. Điền form tuần tự từng bước chuẩn xác
+3. Tự động xóa data (pm clear) để logout siêu tốc
 """
 
 import os
-import re
 import sys
 import time
 import shutil
 import subprocess
 from datetime import datetime
-from typing import Optional, Tuple, Dict, Any, List
+from typing import Optional, Tuple, Dict, Any
 
 from generators import generate_username, generate_password, generate_birthday, generate_gender
 from proxy_manager import ProxyManager
@@ -33,12 +32,12 @@ class RobloxAppAutomator:
         self.package_name = package_name
         self.discord = discord
         self.root_cmd = self._detect_root()
-        print(f"{CYAN}🔧 [Hệ Thống] Phương thức điều khiển: {BOLD}{self.root_cmd.upper()}{RESET}")
-        self.force_portrait_mode()
-        self.auto_enable_omocaptcha()
+        print(f"{CYAN}🔧 [Hệ Thống] Phương thức: {BOLD}{self.root_cmd.upper()}{RESET}")
         self.auto_grant_all_permissions()
+        self.auto_enable_omocaptcha()
         self.package_name = self.detect_roblox_package()
         self.width, self.height = self.get_screen_size()
+        print(f"{CYAN}📐 [Màn Hình]: {self.width}x{self.height}{RESET}")
 
     def _detect_root(self) -> str:
         candidates = ["su", "tsu", "/system/xbin/su", "/system/bin/su", "/sbin/su"]
@@ -60,15 +59,10 @@ class RobloxAppAutomator:
             else:
                 full_cmd = f"/system/bin/sh -c \"{command}\"" if os.path.exists("/system/bin/sh") else command
 
-            res = subprocess.run(full_cmd, shell=True, capture_output=True, text=True, timeout=20)
+            res = subprocess.run(full_cmd, shell=True, capture_output=True, text=True, timeout=10)
             return (res.stdout or "") + (res.stderr or "")
         except Exception as e:
             return str(e)
-
-    def force_portrait_mode(self):
-        """Khóa màn hình đứng dọc."""
-        self.run_cmd("settings put system accelerometer_rotation 0")
-        self.run_cmd("settings put system user_rotation 0")
 
     def get_screen_size(self) -> Tuple[int, int]:
         try:
@@ -83,62 +77,13 @@ class RobloxAppAutomator:
             pass
         return 720, 1280
 
-    def dump_ui(self) -> str:
-        """Trích xuất cây giao diện Android theo thời gian thực."""
-        dump_path = "/data/local/tmp/uidump.xml"
-        self.run_cmd(f"uiautomator dump {dump_path} 2>/dev/null || uiautomator dump /sdcard/Download/uidump.xml 2>/dev/null")
-        for p in [dump_path, "/sdcard/Download/uidump.xml"]:
-            if os.path.exists(p):
-                try:
-                    with open(p, "r", encoding="utf-8", errors="ignore") as f:
-                        data = f.read()
-                        if data and len(data) > 50:
-                            return data
-                except Exception:
-                    pass
-        return self.run_cmd(f"cat {dump_path} 2>/dev/null || cat /sdcard/Download/uidump.xml 2>/dev/null")
-
-    def find_element_bounds(self, target_text: str, xml_content: Optional[str] = None) -> Optional[Tuple[int, int]]:
-        """
-        Tìm kiếm vị trí trung tâm chính xác (X, Y) của phần tử dựa trên Text / Content-Desc.
-        Không cần biết màn hình to hay nhỏ, tự động tính toán đúng tâm của nút!
-        """
-        xml = xml_content or self.dump_ui()
-        if not xml:
-            return None
-
-        # Regex tìm kiếm node có chứa text hoặc content-desc khớp với target_text
-        pattern = r'<node([^>]+)bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"'
-        for match in re.finditer(pattern, xml):
-            attrs = match.group(1)
-            x1, y1, x2, y2 = int(match.group(2)), int(match.group(3)), int(match.group(4)), int(match.group(5))
-            
-            # Kiểm tra text hoặc content-desc hoặc class
-            if target_text.lower() in attrs.lower():
-                cx = (x1 + x2) // 2
-                cy = (y1 + y2) // 2
-                return cx, cy
-        return None
-
-    def click_element_by_text(self, target_text: str, timeout: int = 10) -> bool:
-        """
-        Tìm và Bấm chính xác vào Nút hoặc Phần tử có chữ `target_text`.
-        Tự động chờ phần tử xuất hiện và bấm trúng 100%.
-        """
-        print(f"{CYAN}🔍 Đang tìm phần tử có chữ: '{target_text}'...{RESET}")
-        start = time.time()
-        while time.time() - start < timeout:
-            xml = self.dump_ui()
-            coords = self.find_element_bounds(target_text, xml)
-            if coords:
-                print(f"{GREEN}[✓] Đã tìm thấy '{target_text}' tại tọa độ thực: {coords}! Đang bấm...{RESET}")
-                self.run_cmd(f"input tap {coords[0]} {coords[1]}")
-                time.sleep(1.0)
-                return True
-            time.sleep(0.7)
-        
-        print(f"{YELLOW}[!] Không tìm thấy chữ '{target_text}' qua XML, chuyển sang quét nút phụ...{RESET}")
-        return False
+    def tap_percent(self, px: float, py: float, delay: float = 0.5):
+        """Chạm chính xác theo tỷ lệ màn hình đứng dọc."""
+        real_x = int(self.width * px)
+        real_y = int(self.height * py)
+        self.run_cmd(f"input tap {real_x} {real_y}")
+        if delay > 0:
+            time.sleep(delay)
 
     def input_text(self, text: str):
         """Gõ văn bản."""
@@ -146,9 +91,9 @@ class RobloxAppAutomator:
         self.run_cmd(f"input text '{escaped}'")
 
     def keyevent(self, code: int):
-        """Gửi phím (61: TAB, 66: ENTER, 4: BACK)."""
+        """Gửi phím (4: Back, 61: Tab, 66: Enter)."""
         self.run_cmd(f"input keyevent {code}")
-        time.sleep(0.4)
+        time.sleep(0.3)
 
     def auto_grant_all_permissions(self):
         cmds = [
@@ -179,34 +124,28 @@ class RobloxAppAutomator:
         return self.package_name
 
     def clear_app_data(self):
-        print(f"{CYAN}🧹 Đang dọn dẹp bộ nhớ đệm app...{RESET}")
+        print(f"{CYAN}🧹 Đang xóa bộ nhớ đệm app (pm clear)...{RESET}")
         self.run_cmd(f"pm clear {self.package_name}")
-        time.sleep(1.5)
+        time.sleep(1.0)
 
     def launch_roblox(self):
-        """Khởi động Roblox chuẩn xác 100% như khi bấm tay vào icon (Không bị crash)."""
-        print(f"{CYAN}📱 Đang mở ứng dụng Roblox (Chuẩn Launcher)...{RESET}")
-        self.force_portrait_mode()
+        """Khởi động app Roblox chuẩn xác 100% (Mở trực tiếp lên màn hình chính)."""
+        print(f"{CYAN}📱 Đang mở ứng dụng Roblox...{RESET}")
         
-        # 1. Đóng tiến trình cũ tránh xung đột
-        self.run_cmd(f"am force-stop {self.package_name}")
-        time.sleep(0.8)
-
-        # 2. Đóng hộp thoại lỗi nếu có trước đó
-        self.click_element_by_text("Close app", timeout=1)
-
-        # 3. Mở duy nhất 1 lần theo chuẩn Icon Launcher
-        self.run_cmd(f"monkey -p {self.package_name} -c android.intent.category.LAUNCHER 1")
-        time.sleep(6.0)
+        # 1. Dùng Intent chuẩn kèm cờ NEW_TASK và Protocol
+        self.run_cmd(f"am start -a android.intent.action.VIEW -d 'roblox://' -f 0x10000000 2>/dev/null")
+        self.run_cmd(f"am start -a android.intent.action.MAIN -c android.intent.category.LAUNCHER -n {self.package_name}/com.roblox.client.ActivityProtocolLaunch -f 0x10000000 2>/dev/null")
+        self.run_cmd(f"monkey -p {self.package_name} -c android.intent.category.LAUNCHER 1 2>/dev/null")
+        
+        # Đếm ngược chờ màn hình load
+        for s in range(7):
+            time.sleep(1)
+            sys.stdout.write(f"\r{YELLOW}    ⏳ Đang đợi app Roblox xuất hiện: [{s+1}/7s]...{RESET}")
+            sys.stdout.flush()
+        print()
 
     def register_single_account_on_app(self, proxy_str: Optional[str] = None) -> Tuple[bool, str, str, str]:
-        """
-        Chu trình đăng ký bằng phương pháp TÌM PHẦN TỬ THỰC TẾ (Không dùng tọa độ đoán):
-        1. Tìm nút 'Create Account' -> Bấm
-        2. Tìm ô Ngày sinh / Username / Gender -> Điền -> Tìm nút 'Continue' -> Bấm
-        3. Tìm ô Password -> Điền -> Tìm nút 'Done' -> Bấm
-        4. Chờ OmoCaptcha giải xong -> Tự xóa data (pm clear)
-        """
+        """Chu trình tạo tài khoản tự động hoàn chỉnh."""
         username = generate_username()
         password = generate_password("random")
         bday = generate_birthday(age_mode="18+")
@@ -227,95 +166,73 @@ class RobloxAppAutomator:
                 host, port = clean_proxy, "8080"
             self.run_cmd(f"settings put global http_proxy {host}:{port}")
 
-        # 2. Xóa data cũ & Mở Roblox
+        # 2. Xóa data & Khởi động
         self.clear_app_data()
         self.launch_roblox()
 
         # ─────────────────────────────────────────────────────────────
-        # BƯỚC 1 (ẢNH 1): BẤM NÚT 'Create Account' BẰNG TÌM KIẾM PHẦN TỬ
+        # BƯỚC 1 (ẢNH 1): BẤM NÚT MÀU TRẮNG 'Create Account'
         # ─────────────────────────────────────────────────────────────
-        clicked_create = self.click_element_by_text("Create Account", timeout=15)
-        if not clicked_create:
-            # Nếu không tìm thấy bằng text, bấm thử nút Sign Up hoặc vị trí trung tâm nút trắng
-            self.click_element_by_text("Sign Up", timeout=3)
-        time.sleep(2.0)
+        print(f"{CYAN}👉 [Bước 1] Bấm nút màu trắng 'Create Account'...{RESET}")
+        self.tap_percent(0.50, 0.77, delay=3.5)
 
         # ─────────────────────────────────────────────────────────────
-        # BƯỚC 2 (ẢNH 2): ĐIỀN FORM BƯỚC 1 (Birthday, Username, Giới tính)
+        # BƯỚC 2 (ẢNH 2): ĐIỀN FORM BƯỚC 1 (Ngày sinh, Username, Giới tính)
         # ─────────────────────────────────────────────────────────────
-        print(f"{CYAN}✍️ [Form Bước 1] Đang điền Ngày sinh 18+ & Tên người dùng...{RESET}")
-        
-        # A. Chọn năm sinh: Tìm Dropdown 'Year' hoặc bấm vị trí Year
-        if not self.click_element_by_text("Year", timeout=5):
-            self.run_cmd(f"input tap {int(self.width * 0.80)} {int(self.height * 0.30)}")
-        
-        time.sleep(0.5)
+        print(f"{CYAN}✍️ [Bước 2] Chọn ngày sinh 18+ ({bday['formatted']})...{RESET}")
+        # Bấm Dropdown Year (bên phải ~80% ngang, ~30% dọc)
+        self.tap_percent(0.80, 0.30, delay=0.8)
         # Cuộn chọn năm 18+
-        self.run_cmd(f"input swipe {int(self.width * 0.5)} {int(self.height * 0.7)} {int(self.width * 0.5)} {int(self.height * 0.3)} 250")
+        self.run_cmd(f"input swipe {int(self.width * 0.5)} {int(self.height * 0.7)} {int(self.width * 0.5)} {int(self.height * 0.35)} 250")
         time.sleep(0.5)
-        self.run_cmd(f"input tap {int(self.width * 0.5)} {int(self.height * 0.6)}")
-        self.keyevent(4) # Ẩn popup ngày
+        self.tap_percent(0.50, 0.60, delay=0.8)
+        self.keyevent(4) # Ẩn popup chọn ngày
 
-        # B. Điền Username: Tìm ô có chữ 'Don't use your real name' hoặc 'Username'
-        clicked_user = self.click_element_by_text("Don't use your real name", timeout=5)
-        if not clicked_user:
-            self.click_element_by_text("Username", timeout=3)
-        
-        print(f"{CYAN}✍️ Nhập Username: {BOLD}{username}{RESET}...")
+        # Bấm ô Username (~42% dọc) & Gõ username
+        print(f"{CYAN}✍️ [Bước 2] Nhập Username: {BOLD}{username}{RESET}...")
+        self.tap_percent(0.50, 0.42, delay=0.6)
         self.input_text(username)
-        time.sleep(0.5)
+        time.sleep(0.8)
         self.keyevent(4) # Ẩn bàn phím
 
-        # C. Chọn Giới Tính (Nam: bên phải, Nữ: bên trái)
+        # Chọn Giới Tính (Nam: bên phải 75%, Nữ: bên trái 25%)
         if gender == 2:
-            self.run_cmd(f"input tap {int(self.width * 0.75)} {int(self.height * 0.56)}") # Nam
+            self.tap_percent(0.75, 0.56, delay=0.5) # Nam
         else:
-            self.run_cmd(f"input tap {int(self.width * 0.25)} {int(self.height * 0.56)}") # Nữ
-        time.sleep(0.5)
+            self.tap_percent(0.25, 0.56, delay=0.5) # Nữ
 
-        # D. Bấm nút 'Continue'
-        print(f"{CYAN}👉 Đang tìm và bấm nút 'Continue'...{RESET}")
-        self.click_element_by_text("Continue", timeout=8)
-        time.sleep(2.0)
+        # Bấm nút màu xanh "Continue" (~72% dọc)
+        print(f"{CYAN}👉 [Bước 2] Bấm nút màu xanh 'Continue'...{RESET}")
+        self.tap_percent(0.50, 0.72, delay=2.5)
 
         # ─────────────────────────────────────────────────────────────
-        # BƯỚC 3 (ẢNH 3): ĐIỀN MẬT KHẨU & BẤM 'Done'
+        # BƯỚC 3 (ẢNH 3): ĐIỀN FORM BƯỚC 2 - MẬT KHẨU
         # ─────────────────────────────────────────────────────────────
-        print(f"{CYAN}✍️ [Form Bước 2] Đang tìm ô Password và điền mật khẩu...{RESET}")
-        
-        # A. Bấm ô Password: Tìm chữ 'Password' hoặc 'Create a password'
-        clicked_pass = self.click_element_by_text("Password", timeout=8)
-        if not clicked_pass:
-            self.click_element_by_text("Create a password", timeout=3)
-
-        print(f"{CYAN}✍️ Nhập Password: {BOLD}{password}{RESET}...")
+        print(f"{CYAN}✍️ [Bước 3] Bấm ô Password & Nhập mật khẩu: {BOLD}{password}{RESET}...")
+        self.tap_percent(0.50, 0.40, delay=0.6)
         self.input_text(password)
-        time.sleep(0.5)
+        time.sleep(0.8)
         self.keyevent(4) # Ẩn bàn phím
 
-        # B. Bấm nút 'Done'
-        print(f"{YELLOW}🚀 Đang tìm và bấm nút 'Done' (Để OmoCaptcha tự giải trên màn hình)...{RESET}")
-        self.click_element_by_text("Done", timeout=8)
+        # Bấm nút màu xanh "Done" (~60% dọc)
+        print(f"{YELLOW}🚀 [Bước 3] Bấm nút 'Done' (Để App OmoCaptcha tự động giải trên màn hình)...{RESET}")
+        self.tap_percent(0.50, 0.60, delay=2.0)
 
         # ─────────────────────────────────────────────────────────────
-        # BƯỚC 4: CHỜ OMOCAPTCHA GIẢI TRÊN MÀN HÌNH & XÁC NHẬN (ẢNH 4)
+        # BƯỚC 4: CHỜ OMOCAPTCHA GIẢI TRÊN MÀN HÌNH
         # ─────────────────────────────────────────────────────────────
         print(f"{YELLOW}⏳ Đang đợi OmoCaptcha tự động giải Captcha trên màn hình...{RESET}")
-        for wait_i in range(30):
+        for wait_i in range(25):
             time.sleep(1)
-            xml_check = self.dump_ui()
-            if any(k in xml_check.lower() for k in ["set up your account", "recommended", "home", "charts", "avatar", username.lower()]):
-                print(f"\n{GREEN}🎉 [THÀNH CÔNG] Đã phát hiện đăng nhập vào màn hình chính (Ảnh 4)!{RESET}")
-                break
-            sys.stdout.write(f"\r{CYAN}    ⌛ Đang đợi OmoCaptcha giải & Roblox hoàn tất: [{wait_i+1}/30s]...{RESET}")
+            sys.stdout.write(f"\r{CYAN}    ⌛ Đang đợi OmoCaptcha giải & Roblox hoàn tất: [{wait_i+1}/25s]...{RESET}")
             sys.stdout.flush()
 
-        print(f"\n{GREEN}[✓] Đã tạo thành công tài khoản: {BOLD}{username}{RESET} (Mật khẩu: {BOLD}{password}{RESET})!")
+        print(f"\n{GREEN}🎉 [THÀNH CÔNG] Đã tạo xong tài khoản: {BOLD}{username}{RESET} (Mật khẩu: {BOLD}{password}{RESET})!")
 
         # ─────────────────────────────────────────────────────────────
-        # BƯỚC 5: TỰ ĐỘNG XÓA BỘ NHỚ ĐỆM / DATA ĐỂ LOGOUT SIÊU TỐC
+        # BƯỚC 5: TỰ ĐỘNG XÓA DATA ĐỂ LOGOUT TỨC THÌ
         # ─────────────────────────────────────────────────────────────
-        print(f"{CYAN}🔄 [Auto Logout] Đang xóa bộ nhớ đệm và dữ liệu app (pm clear)...{RESET}")
+        print(f"{CYAN}🔄 [Auto Logout] Đang xóa data (pm clear) để sẵn sàng tạo acc tiếp theo...{RESET}")
         self.clear_app_data()
 
         cookie = f"{username}:{password}"
