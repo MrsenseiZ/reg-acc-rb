@@ -2,11 +2,16 @@
 # -*- coding: utf-8 -*-
 """
 Module Tự Động Tải & Cài Đặt APK Roblox / Delta Trên Termux & Cloud Phone
-Hỗ trợ cài qua: Root (su/tsu), ADB Shell, hoặc Termux Package Installer Intent.
+Hỗ trợ:
+1. Tải qua Curl / Wget / Requests (Bypass Cloudflare)
+2. Tự động quét và cài đặt nếu file đã có trong /sdcard/Download/
+3. Tự động mở trình duyệt Cloud Phone nếu bị chặn IP
+4. Cài đặt qua: Root (su/tsu), ADB Shell, hoặc Package Installer.
 """
 
 import os
 import sys
+import glob
 import time
 import shutil
 import subprocess
@@ -26,22 +31,44 @@ class ApkInstaller:
         self.package_name = package_name
         self.apk_path = os.path.abspath(self.filename)
 
+    def find_local_apk(self) -> Optional[str]:
+        """Tự động tìm kiếm file APK có sẵn trong thư mục hiện tại hoặc /sdcard/Download/"""
+        search_dirs = [".", "/sdcard/Download", "/sdcard/Downloads", "/storage/emulated/0/Download"]
+        patterns = [self.filename, "*Delta*.apk", "*delta*.apk", "*roblox*.apk", "*Roblox*.apk"]
+        
+        for d in search_dirs:
+            if not os.path.exists(d):
+                continue
+            for pat in patterns:
+                matches = glob.glob(os.path.join(d, pat))
+                for m in matches:
+                    if os.path.isfile(m) and os.path.getsize(m) > 10 * 1024 * 1024:
+                        return os.path.abspath(m)
+        return None
+
     def download_apk(self) -> bool:
         """Tải APK với thanh tiến trình trực quan (Bypass Cloudflare bằng Curl/Wget)."""
+        # Kiểm tra nếu máy đã có sẵn file tải về từ trước
+        existing_apk = self.find_local_apk()
+        if existing_apk:
+            print(f"{GREEN}[✓] Tìm thấy file APK có sẵn: {existing_apk} ({os.path.getsize(existing_apk)/(1024*1024):.1f} MB)! Đang tiến hành cài đặt...{RESET}")
+            self.apk_path = existing_apk
+            return True
+
         if not self.apk_url:
             print(f"{RED}[!] Không có link tải APK trong cấu hình!{RESET}")
             return False
 
         print(f"\n{CYAN}[+] Đang kết nối tới máy chủ tải APK: {self.apk_url}{RESET}")
 
-        # 1. Thử tải bằng CURL (Tự động bypass Cloudflare 403 & có thanh tiến trình chuẩn)
+        # 1. Thử tải bằng CURL chuyên dụng (Chống Cloudflare 403)
         if shutil.which("curl"):
             try:
                 print(f"{CYAN}[+] Đang tải APK bằng CURL (Chống chặn Cloudflare)...{RESET}")
                 ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
-                cmd = ["curl", "-L", "-A", ua, "--progress-bar", "-o", self.apk_path, self.apk_url]
+                cmd = ["curl", "-k", "-L", "-A", ua, "--progress-bar", "-o", self.apk_path, self.apk_url]
                 ret = subprocess.run(cmd)
-                if ret.returncode == 0 and os.path.exists(self.apk_path) and os.path.getsize(self.apk_path) > 1024 * 1024:
+                if ret.returncode == 0 and os.path.exists(self.apk_path) and os.path.getsize(self.apk_path) > 10 * 1024 * 1024:
                     print(f"\n{GREEN}[✓] Đã tải thành công APK ({os.path.getsize(self.apk_path)/(1024*1024):.1f} MB) về: {self.apk_path}{RESET}")
                     return True
             except Exception as e:
@@ -52,51 +79,29 @@ class ApkInstaller:
             try:
                 print(f"{CYAN}[+] Đang tải APK bằng WGET...{RESET}")
                 ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36"
-                cmd = ["wget", "-U", ua, "-O", self.apk_path, self.apk_url]
+                cmd = ["wget", "--no-check-certificate", "-U", ua, "-O", self.apk_path, self.apk_url]
                 ret = subprocess.run(cmd)
-                if ret.returncode == 0 and os.path.exists(self.apk_path) and os.path.getsize(self.apk_path) > 1024 * 1024:
+                if ret.returncode == 0 and os.path.exists(self.apk_path) and os.path.getsize(self.apk_path) > 10 * 1024 * 1024:
                     print(f"\n{GREEN}[✓] Đã tải thành công APK về: {self.apk_path}{RESET}")
                     return True
             except Exception:
                 pass
 
-        # 3. Fallback bằng Python Requests
+        # 3. Nếu máy chủ Cloudflare chặn IP máy ảo -> Tự động mở Trình duyệt Cloud Phone để tải
+        print(f"\n{YELLOW}[!] Máy chủ link APK đang bật Cloudflare chặn tải trực tiếp qua dòng lệnh.{RESET}")
+        print(f"{CYAN}🌐 Đang tự động mở Trình duyệt trên Cloud Phone để tải về...{RESET}")
+        
         try:
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
-                "Referer": "https://delta.filenetwork.vip/",
-                "Accept": "*/*"
-            }
-            res = requests.get(self.apk_url, headers=headers, stream=True, timeout=60)
-            if res.status_code != 200:
-                print(f"{RED}[!] Lỗi tải APK (HTTP {res.status_code}){RESET}")
-                return False
+            if shutil.which("termux-open-url"):
+                subprocess.run(["termux-open-url", self.apk_url])
+            else:
+                subprocess.run(["am", "start", "-a", "android.intent.action.VIEW", "-d", self.apk_url])
+            print(f"{GREEN}[✓] Đã mở link trên trình duyệt! Bạn chỉ cần bấm Tải về trên trình duyệt Cloud Phone.{RESET}")
+        except Exception:
+            pass
 
-            total_size = int(res.headers.get('content-length', 0))
-            downloaded = 0
-            start_time = time.time()
-
-            print(f"{CYAN}[+] Đang tải về file: {self.filename} ({total_size / (1024*1024):.2f} MB)...{RESET}")
-
-            with open(self.apk_path, "wb") as f:
-                for chunk in res.iter_content(chunk_size=1024 * 256):
-                    if chunk:
-                        f.write(chunk)
-                        downloaded += len(chunk)
-                        if total_size > 0:
-                            percent = (downloaded / total_size) * 100
-                            mb_down = downloaded / (1024 * 1024)
-                            mb_total = total_size / (1024 * 1024)
-                            speed = (downloaded / 1024) / max(0.1, time.time() - start_time)
-                            sys.stdout.write(f"\r{CYAN}    ⏳ Tiến độ: [{percent:5.1f}%] {mb_down:.1f}/{mb_total:.1f} MB ({speed:.0f} KB/s){RESET}")
-                            sys.stdout.flush()
-
-            print(f"\n{GREEN}[✓] Đã tải thành công APK về: {self.apk_path}{RESET}")
-            return True
-
-        except Exception as e:
-            print(f"\n{RED}[!] Lỗi trong quá trình tải APK: {e}{RESET}")
-            return False
+        print(f"\n{YELLOW}💡 Mẹo: Bạn chỉ cần mở Chrome trên Cloud Phone tải file APK về thư mục Download, Tool sẽ tự động nhận diện và cài đặt!{RESET}")
+        return False
 
     def is_installed(self) -> bool:
         """Kiểm tra app Roblox đã được cài đặt trên máy chưa."""
@@ -110,11 +115,15 @@ class ApkInstaller:
 
     def install_apk(self) -> bool:
         """Cài đặt file APK lên thiết bị Android / Cloud Phone."""
-        if not os.path.exists(self.apk_path):
-            print(f"{RED}[!] Không tìm thấy file {self.apk_path} để cài đặt!{RESET}")
-            return False
+        if not os.path.exists(self.apk_path) or os.path.getsize(self.apk_path) < 1024 * 1024:
+            local = self.find_local_apk()
+            if local:
+                self.apk_path = local
+            else:
+                print(f"{RED}[!] Không tìm thấy file APK hợp lệ để cài đặt!{RESET}")
+                return False
 
-        print(f"\n{YELLOW}[*] Đang thực hiện cài đặt {self.filename}...{RESET}")
+        print(f"\n{YELLOW}[*] Đang thực hiện cài đặt {os.path.basename(self.apk_path)}...{RESET}")
 
         # Phương pháp 1: Cài đặt thông qua Root (su / tsu - Phổ biến trên Cloud Phone)
         for root_cmd in ["su", "tsu"]:
@@ -143,7 +152,6 @@ class ApkInstaller:
         # Phương pháp 3: Gọi trình cài đặt chuẩn Android (termux-open / package-installer intent)
         try:
             print(f"{CYAN} -> Đang mở Trình cài đặt Gói Android (Package Installer)...{RESET}")
-            # Chuyển APK ra thư mục public /sdcard/Download để hệ điều hành có quyền đọc
             sdcard_dest = f"/sdcard/Download/{self.filename}"
             try:
                 shutil.copyfile(self.apk_path, sdcard_dest)
