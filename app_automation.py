@@ -179,15 +179,25 @@ class RobloxAppAutomator:
         return self.package_name
 
     def clear_app_data(self):
+        print(f"{CYAN}🧹 Đang dọn dẹp bộ nhớ đệm app...{RESET}")
         self.run_cmd(f"pm clear {self.package_name}")
-        time.sleep(1)
+        time.sleep(1.5)
 
     def launch_roblox(self):
-        print(f"{CYAN}📱 Đang khởi động Roblox...{RESET}")
+        """Khởi động Roblox chuẩn xác 100% như khi bấm tay vào icon (Không bị crash)."""
+        print(f"{CYAN}📱 Đang mở ứng dụng Roblox (Chuẩn Launcher)...{RESET}")
         self.force_portrait_mode()
-        self.run_cmd(f"am start -n {self.package_name}/com.roblox.client.ActivityProtocolLaunch")
-        self.run_cmd(f"am start -n {self.package_name}/com.roblox.client.activity.SplashActivity")
+        
+        # 1. Đóng tiến trình cũ tránh xung đột
+        self.run_cmd(f"am force-stop {self.package_name}")
+        time.sleep(0.8)
+
+        # 2. Đóng hộp thoại lỗi nếu có trước đó
+        self.click_element_by_text("Close app", timeout=1)
+
+        # 3. Mở duy nhất 1 lần theo chuẩn Icon Launcher
         self.run_cmd(f"monkey -p {self.package_name} -c android.intent.category.LAUNCHER 1")
+        time.sleep(6.0)
 
     def register_single_account_on_app(self, proxy_str: Optional[str] = None) -> Tuple[bool, str, str, str]:
         """
