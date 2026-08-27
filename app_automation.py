@@ -2,10 +2,13 @@
 # -*- coding: utf-8 -*-
 """
 Module Tự Động Thao Tác Trực Tiếp Trên App Delta Roblox (Android Native UI)
-Sử dụng độ phân giải động (Dynamic Percentage Coordinates) để:
-1. Tự động cấp quyền hiển thị
-2. Mở App Delta Roblox lên màn hình trước
-3. Tự động nhận diện nút 'Create Account' và điền form chuẩn 100% mọi dòng máy
+Kết hợp với app OmoCaptcha Trợ Năng (Accessibility Service) trên Cloud Phone:
+1. Tự động cấp quyền Root (su / tsu) để ép App Roblox mở đè lên màn hình chính
+2. Tự động bật Dịch vụ Trợ Năng cho App OmoCaptcha để tự giải Arkose Captcha trên màn hình
+3. Tự động đo màn hình & bấm nút 'Create Account'
+4. Điền Birthday 18+, Username, Password, Gender
+5. Bấm 'Sign Up' và chờ OmoCaptcha giải xong trên màn hình
+6. Xuất tài khoản thành công và gửi về Discord
 """
 
 import os
@@ -33,26 +36,34 @@ class RobloxAppAutomator:
         self.package_name = package_name
         self.discord = discord
         self.root_cmd = self._detect_root()
+        print(f"{CYAN}🔧 [Hệ Thống] Phương thức điều khiển: {BOLD}{self.root_cmd.upper()}{RESET}")
+        self.auto_enable_omocaptcha()
         self.auto_grant_all_permissions()
         self.package_name = self.detect_roblox_package()
         self.width, self.height = self.get_screen_size()
 
     def _detect_root(self) -> str:
-        for cmd in ["su", "tsu"]:
-            if shutil.which(cmd):
-                return cmd
-        for p in ["/system/bin/su", "/system/xbin/su", "/sbin/su"]:
-            if os.path.exists(p):
-                return p
-        return "sh"
+        """Kiểm tra và xác thực quyền Root thực tế (su / tsu / system binaries)."""
+        candidates = ["tsu", "su", "/system/xbin/su", "/system/bin/su", "/sbin/su"]
+        for cmd in candidates:
+            if shutil.which(cmd) or os.path.exists(cmd):
+                try:
+                    r = subprocess.run(f"{cmd} -c 'id'", shell=True, capture_output=True, text=True, timeout=3)
+                    if "uid=0" in r.stdout or r.returncode == 0:
+                        return cmd
+                except Exception:
+                    pass
+        if shutil.which("adb"):
+            return "adb shell"
+        return "su" # Mặc định trên Cloud Phone
 
     def run_cmd(self, command: str) -> str:
         """Thực thi lệnh shell qua Root hoặc ADB."""
         try:
-            if self.root_cmd in ["su", "tsu", "/system/bin/su", "/system/xbin/su", "/sbin/su"]:
-                full_cmd = f"{self.root_cmd} -c '{command}'"
-            elif shutil.which("adb"):
+            if self.root_cmd == "adb shell":
                 full_cmd = f"adb shell {command}"
+            elif self.root_cmd:
+                full_cmd = f"{self.root_cmd} -c '{command}'"
             else:
                 full_cmd = command
 
@@ -60,6 +71,19 @@ class RobloxAppAutomator:
             return (res.stdout or "") + (res.stderr or "")
         except Exception as e:
             return str(e)
+
+    def auto_enable_omocaptcha(self):
+        """Tự động kích hoạt Dịch vụ Trợ Năng cho App OmoCaptcha trên Cloud Phone."""
+        print(f"{CYAN}🧩 [OmoCaptcha] Đang kích hoạt Dịch vụ Trợ Năng tự giải Captcha trên màn hình...{RESET}")
+        try:
+            self.run_cmd("settings put secure accessibility_enabled 1")
+            # Kích hoạt mọi accessibility service của com.omocaptcha
+            out = self.run_cmd("pm list packages")
+            if "omocaptcha" in out:
+                self.run_cmd("settings put secure enabled_accessibility_services com.omocaptcha/com.omocaptcha.service.MyAccessibilityService:com.omocaptcha/.AccessibilityService")
+                print(f"{GREEN}[✓] Đã kích hoạt Dịch Vụ Trợ Năng OmoCaptcha!{RESET}")
+        except Exception:
+            pass
 
     def get_screen_size(self) -> Tuple[int, int]:
         """Lấy độ phân giải thực tế của màn hình Cloud Phone (wm size)."""
@@ -124,24 +148,26 @@ class RobloxAppAutomator:
         time.sleep(1)
 
     def launch_roblox(self):
-        """Khởi động app Delta Roblox đưa lên màn hình trước (Foreground)."""
+        """Khởi động app Delta Roblox đưa lên màn hình trước (Foreground) bằng quyền Root."""
         print(f"{CYAN}📱 Đang mở ứng dụng Roblox lên màn hình trước...{RESET}")
-        self.run_cmd(f"am start -n {self.package_name}/com.roblox.client.ActivityProtocolLaunch 2>/dev/null")
-        self.run_cmd(f"am start -n {self.package_name}/com.roblox.client.activity.SplashActivity 2>/dev/null")
-        self.run_cmd(f"monkey -p {self.package_name} 1 2>/dev/null")
+        # Ép đưa Roblox lên foreground qua Intent và Monkey bằng Root
+        self.run_cmd(f"am start -n {self.package_name}/com.roblox.client.ActivityProtocolLaunch")
+        self.run_cmd(f"am start -n {self.package_name}/com.roblox.client.activity.SplashActivity")
+        self.run_cmd(f"monkey -p {self.package_name} -c android.intent.category.LAUNCHER 1")
         
         # Chờ 7 giây cho màn hình Roblox load xong nút Create Account
-        print(f"{YELLOW}⏳ Đang đợi màn hình chính Roblox xuất hiện...{RESET}")
+        print(f"{YELLOW}⏳ Đang đợi màn hình chính Roblox xuất hiện (7s)...{RESET}")
         time.sleep(7)
 
     def register_single_account_on_app(self, proxy_str: Optional[str] = None) -> Tuple[bool, str, str, str]:
         """
         Chu trình tự động đăng ký 1 tài khoản trực tiếp trên màn hình App:
-        1. Gán Proxy
-        2. Mở app Roblox
+        1. Gán Proxy toàn máy
+        2. Mở app Roblox lên màn hình
         3. Bấm 'Create Account' (nút trắng lớn)
-        4. Tự điền Birthday, Username, Password, Gender
+        4. Tự điền Birthday 18+, Username, Password, Gender
         5. Bấm 'Sign Up'
+        6. Để App OmoCaptcha tự động giải Captcha trên màn hình
         """
         username = generate_username()
         password = generate_password("random")
@@ -161,6 +187,7 @@ class RobloxAppAutomator:
                 host, port = parts[0], parts[1]
             else:
                 host, port = clean_proxy, "8080"
+            print(f"{YELLOW}🍦 [App Auto] Đã gán Proxy cho Cloud Phone: {host}:{port}{RESET}")
             self.run_cmd(f"settings put global http_proxy {host}:{port}")
 
         # 2. Xóa data app cũ & Mở Roblox
@@ -169,14 +196,14 @@ class RobloxAppAutomator:
 
         # 3. Bấm nút màu trắng "Create Account" (Nằm ở ~77% chiều cao màn hình)
         print(f"{CYAN}👉 [App Auto] Đang bấm nút màu trắng 'Create Account'...{RESET}")
-        self.tap_percent(0.50, 0.77, delay_after=3.0)
+        self.tap_percent(0.50, 0.77, delay_after=3.5)
 
         # 4. Tự điền form đăng ký
         print(f"{CYAN}✍️ [App Auto] Đang điền form đăng ký ({bday['age']} tuổi)...{RESET}")
         
         # Bấm ô Birthday (~32% màn hình)
         self.tap_percent(0.50, 0.32, delay_after=1.0)
-        # Cuộn nhẹ hoặc bấm nút Xác nhận Ngày Sinh ở góc dưới popup (~90% màn hình)
+        # Bấm nút Xác nhận Ngày Sinh ở popup (~90% màn hình)
         self.tap_percent(0.50, 0.90, delay_after=1.0)
 
         # Bấm ô Username (~44% màn hình) & Gõ username
@@ -195,17 +222,17 @@ class RobloxAppAutomator:
         else:
             self.tap_percent(0.65, 0.66, delay_after=0.5) # Nữ
 
-        # Bấm nút màu trắng Sign Up / Đăng Ký (~77% màn hình)
-        print(f"{YELLOW}🚀 [App Auto] Đang bấm nút 'Sign Up' và chờ xử lý...{RESET}")
-        self.tap_percent(0.50, 0.77, delay_after=1.0)
+        # Bấm nút Sign Up / Đăng Ký (~77% màn hình)
+        print(f"{YELLOW}🚀 [App Auto] Đang bấm nút 'Sign Up' (Chờ OmoCaptcha tự động giải trên màn hình)...{RESET}")
+        self.tap_percent(0.50, 0.77, delay_after=2.0)
 
-        # 5. Chờ hoàn tất đăng ký hoặc captcha
-        for wait_i in range(15):
+        # 5. Chờ OmoCaptcha trên máy tự động phát hiện và giải trên màn hình
+        for wait_i in range(25):
             time.sleep(1)
-            sys.stdout.write(f"\r{CYAN}    ⌛ Đang chờ Roblox xử lý trên màn hình: [{wait_i+1}/15s]...{RESET}")
+            sys.stdout.write(f"\r{CYAN}    ⌛ Đang đợi OmoCaptcha giải & Roblox hoàn tất: [{wait_i+1}/25s]...{RESET}")
             sys.stdout.flush()
 
-        print(f"\n{GREEN}[✓] Đã hoàn tất chu trình đăng ký tài khoản: {username}!{RESET}")
+        print(f"\n{GREEN}[✓] Đã hoàn tất chu trình tạo tài khoản: {BOLD}{username}{RESET}!")
 
-        cookie = f".ROBLOSECURITY=_|WARNING:-DO-NOT-SHARE-THIS.--Sharing-this-will-allow-someone-to-log-in-to-your-account-and-to-steal-your-ROBUX-and-items.|_{username}_APP_CREATED"
+        cookie = f"{username}:{password}"
         return True, username, password, cookie
