@@ -43,31 +43,29 @@ class RobloxAppAutomator:
         self.width, self.height = self.get_screen_size()
 
     def _detect_root(self) -> str:
-        """Kiểm tra và xác thực quyền Root thực tế (su / tsu / system binaries)."""
-        candidates = ["tsu", "su", "/system/xbin/su", "/system/bin/su", "/sbin/su"]
+        """Kiểm tra quyền Root (su / tsu / system binaries) hoặc chạy trực tiếp trên Android."""
+        candidates = ["su", "tsu", "/system/xbin/su", "/system/bin/su", "/sbin/su"]
         for cmd in candidates:
             if shutil.which(cmd) or os.path.exists(cmd):
                 try:
-                    r = subprocess.run(f"{cmd} -c 'id'", shell=True, capture_output=True, text=True, timeout=3)
+                    r = subprocess.run(f"{cmd} -c 'id'", shell=True, capture_output=True, text=True, timeout=2)
                     if "uid=0" in r.stdout or r.returncode == 0:
                         return cmd
                 except Exception:
                     pass
-        if shutil.which("adb"):
-            return "adb shell"
-        return "su" # Mặc định trên Cloud Phone
+        # Nếu không có root, chạy trực tiếp lệnh hệ thống Android (Native Shell)
+        return "native"
 
     def run_cmd(self, command: str) -> str:
-        """Thực thi lệnh shell qua Root hoặc ADB."""
+        """Thực thi lệnh shell trực tiếp trên Android."""
         try:
-            if self.root_cmd == "adb shell":
-                full_cmd = f"adb shell {command}"
-            elif self.root_cmd:
-                full_cmd = f"{self.root_cmd} -c '{command}'"
+            if self.root_cmd in ["su", "tsu", "/system/xbin/su", "/system/bin/su", "/sbin/su"]:
+                full_cmd = f"{self.root_cmd} -c \"{command}\""
             else:
-                full_cmd = command
+                # Chạy trực tiếp qua sh của Android
+                full_cmd = f"/system/bin/sh -c \"{command}\"" if os.path.exists("/system/bin/sh") else command
 
-            res = subprocess.run(full_cmd, shell=True, capture_output=True, text=True, timeout=30)
+            res = subprocess.run(full_cmd, shell=True, capture_output=True, text=True, timeout=15)
             return (res.stdout or "") + (res.stderr or "")
         except Exception as e:
             return str(e)
